@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
 Bluetooth RFCOMM client for the host computer.
+No third-party Bluetooth library required — uses Python stdlib socket.
+
 Usage:
-    python3 client.py                      # auto-discover Pi
-    python3 client.py AA:BB:CC:DD:EE:FF    # connect to known address
-Requires: pip install uvloop PyBluez2
+    python3 computer_client.py AA:BB:CC:DD:EE:FF    # Pi's BT MAC address
+
+How to find the Pi's BT address:
+    On the Pi, run:  hciconfig hci0 | grep "BD Address"
+
+Install: pip install uvloop
 """
 
 import asyncio
-import bluetooth
 import logging
 import signal
+import socket
 import sys
 import time
 
@@ -19,7 +24,7 @@ try:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     print("[boot] uvloop active")
 except ImportError:
-    print("[boot] WARNING: uvloop not found, falling back to default asyncio loop")
+    print("[boot] WARNING: uvloop not found — install with: pip install uvloop")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,49 +32,29 @@ logging.basicConfig(
 )
 log = logging.getLogger("host")
 
-RFCOMM_CHANNEL = 1
-SERVICE_NAME = "BTSatellite"
-RECONNECT_DELAY = 3.0    # seconds between reconnect attempts
-READ_SIZE = 4096
-CONNECT_TIMEOUT = 10.0   # seconds to wait for initial connection
-
-
-def discover_pi() -> str | None:
-    """Scan for a device advertising BTSatellite and return its address."""
-    print("Scanning for BTSatellite service... (this takes ~10s)")
-    try:
-        services = bluetooth.find_service(name=SERVICE_NAME)
-        if services:
-            addr = services[0]["host"]
-            print(f"Found BTSatellite at {addr}")
-            return addr
-    except Exception as e:
-        log.error(f"Discovery failed: {e}")
-    return None
+RFCOMM_CHANNEL  = 1
+READ_SIZE       = 4096
+RECONNECT_DELAY = 3.0   # seconds between reconnect attempts
+CONNECT_TIMEOUT = 10.0  # seconds before giving up on a connection attempt
 
 
 class HostClient:
     def __init__(self, pi_addr: str):
-        self.pi_addr = pi_addr
-        self.sock = None
-        self.running = False
-        self._send_queue: asyncio.Queue = None
-        self._loop: asyncio.AbstractEventLoop = None
+        self.pi_addr    = pi_addr
+        self.sock       = None
+        self.running    = False
+        self._send_q: asyncio.Queue | None = None
 
     async def connect(self) -> bool:
-        """Attempt to connect to the Pi. Returns True on success."""
-        sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-        sock.setblocking(False)
-        self._loop = asyncio.get_running_loop()
+        """Open a non-blocking RFCOMM socket to the Pi. Returns True on success."""
+        sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+        sock.setblocking(True)  # connect() itself must be blocking
 
-        log.info(f"Connecting to {self.pi_addr}:{RFCOMM_CHANNEL}...")
+        log.info(f"Connecting to {self.pi_addr}:{RFCOMM_CHANNEL} ...")
+        loop = asyncio.get_running_loop()
         try:
-            # BluetoothSocket.connect() is not truly async — run in executor
-            # to avoid blocking the event loop during the BT handshake
             await asyncio.wait_for(
-                self._loop.run_in_executor(
-                    None, sock.connect, (self.pi_addr, RFCOMM_CHANNEL)
-                ),
+                loop.run_in_executor(None, sock.connect, (self.pi_addr, RFCOMM_CHANNEL)),
                 timeout=CONNECT_TIMEOUT,
             )
             sock.setblocking(False)
@@ -77,11 +62,11 @@ class HostClient:
             log.info("Connected!")
             return True
         except asyncio.TimeoutError:
-            log.error(f"Connection timed out after {CONNECT_TIMEOUT}s")
-        except bluetooth.btcommon.BluetoothError as e:
-            log.error(f"Bluetooth error: {e}")
-        except Exception as e:
+            log.error(f"Timed out after {CONNECT_TIMEOUT}s")
+        except OSError as e:
             log.error(f"Connection failed: {e}")
+        except Exception as e:
+            log.error(f"Unexpected error: {e}")
 
         try:
             sock.close()
@@ -90,23 +75,22 @@ class HostClient:
         return False
 
     async def run(self):
-        """Main loop: connect, run reader+writer, reconnect on drop."""
-        self.running = True
-        self._send_queue = asyncio.Queue()
+        self.running  = True
+        self._send_q  = asyncio.Queue()
 
-        # Start interactive input in a background thread (so it doesn't block)
+        # Read stdin in a background thread so it never blocks the event loop
         input_task = asyncio.create_task(self._input_loop())
 
         while self.running:
             if not await self.connect():
-                log.info(f"Retrying in {RECONNECT_DELAY}s...")
+                log.info(f"Retrying in {RECONNECT_DELAY}s ...")
                 await asyncio.sleep(RECONNECT_DELAY)
                 continue
 
             reader_task = asyncio.create_task(self._reader())
             writer_task = asyncio.create_task(self._writer())
 
-            # Run until either reader or writer exits (connection dropped)
+            # Run until either side drops
             done, pending = await asyncio.wait(
                 [reader_task, writer_task],
                 return_when=asyncio.FIRST_COMPLETED,
@@ -117,17 +101,17 @@ class HostClient:
             self._close_socket()
 
             if self.running:
-                log.info(f"Connection lost. Reconnecting in {RECONNECT_DELAY}s...")
+                log.info(f"Connection lost. Reconnecting in {RECONNECT_DELAY}s ...")
                 await asyncio.sleep(RECONNECT_DELAY)
 
         input_task.cancel()
 
     async def _reader(self):
-        """Receive data from Pi and print to stdout."""
-        buf = b""
+        loop = asyncio.get_running_loop()
+        buf  = b""
         while True:
             try:
-                chunk = await self._loop.sock_recv(self.sock, READ_SIZE)
+                chunk = await loop.sock_recv(self.sock, READ_SIZE)
             except (ConnectionResetError, BrokenPipeError, OSError):
                 log.warning("Reader: connection lost")
                 break
@@ -140,35 +124,34 @@ class HostClient:
                 line, buf = buf.split(b"\n", 1)
                 line = line.strip()
                 if line and line != b"__ping__":
-                    print(f"\n<< {line.decode('utf-8', errors='replace')}")
+                    # Clear the current "> " prompt, print response, redraw prompt
+                    print(f"\r\033[K<< {line.decode('utf-8', errors='replace')}")
                     print(">> ", end="", flush=True)
 
     async def _writer(self):
-        """Pull messages from the queue and send them to the Pi."""
         while True:
             try:
-                msg: bytes = await asyncio.wait_for(
-                    self._send_queue.get(), timeout=1.0
-                )
+                msg: bytes = await asyncio.wait_for(self._send_q.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
 
+            loop = asyncio.get_running_loop()
             try:
-                await self._loop.sock_sendall(self.sock, msg)
+                await loop.sock_sendall(self.sock, msg)
             except (BrokenPipeError, OSError) as e:
                 log.warning(f"Writer: send failed: {e}")
                 break
 
     async def _input_loop(self):
-        """Read stdin in a thread and push messages to the send queue."""
+        """Read lines from stdin and push them onto the send queue."""
         loop = asyncio.get_running_loop()
-        print(f"Connected to {self.pi_addr}. Type messages and press Enter.")
-        print("Ctrl+C to quit.\n")
+        print(f"\nReady. Type a message and press Enter. Ctrl+C to quit.\n")
 
         while self.running:
             try:
+                print(">> ", end="", flush=True)
                 line = await loop.run_in_executor(None, sys.stdin.readline)
             except Exception:
                 break
@@ -178,8 +161,7 @@ class HostClient:
 
             line = line.strip()
             if line:
-                print(">> ", end="", flush=True)
-                await self._send_queue.put((line + "\n").encode("utf-8"))
+                await self._send_q.put((line + "\n").encode("utf-8"))
 
     def _close_socket(self):
         if self.sock:
@@ -195,23 +177,19 @@ class HostClient:
 
 
 async def main():
-    # Determine Pi address
-    if len(sys.argv) > 1:
-        pi_addr = sys.argv[1]
-        print(f"Using provided address: {pi_addr}")
-    else:
-        pi_addr = discover_pi()
-        if not pi_addr:
-            print("Could not find BTSatellite service.")
-            print("Make sure pi_server.py is running on your Pi.")
-            print("Or provide the address manually: python3 computer_client.py AA:BB:CC:DD:EE:FF")
-            sys.exit(1)
+    if len(sys.argv) != 2:
+        print("Usage: python3 computer_client.py AA:BB:CC:DD:EE:FF")
+        print()
+        print("To find the Pi's BT address, run on the Pi:")
+        print("  hciconfig hci0 | grep 'BD Address'")
+        sys.exit(1)
 
-    client = HostClient(pi_addr)
-    loop = asyncio.get_running_loop()
+    pi_addr = sys.argv[1].upper().strip()
+    client  = HostClient(pi_addr)
+    loop    = asyncio.get_running_loop()
 
     def shutdown(*_):
-        print("\nShutting down...")
+        print("\nShutting down ...")
         loop.create_task(client.stop())
 
     for sig in (signal.SIGINT, signal.SIGTERM):
