@@ -188,17 +188,24 @@ class ClientHandler:
 
 
 async def main():
-    server = SatelliteServer()
-    loop   = asyncio.get_running_loop()
+    server    = SatelliteServer()
+    loop      = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
 
     def shutdown(*_):
         log.info("Shutdown signal received")
-        loop.create_task(server.stop())
+        async def _stop():
+            await server.stop()
+            main_task.cancel()
+        loop.create_task(_stop())
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown)
 
-    await server.start()
+    try:
+        await server.start()
+    except asyncio.CancelledError:
+        pass
 
 
 if __name__ == "__main__":
