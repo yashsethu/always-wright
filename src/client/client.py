@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """
-Bluetooth RFCOMM client for the host computer.
-No third-party Bluetooth library required — uses Python stdlib socket.
+Bluetooth RFCOMM client for macOS.
+Uses pyserial via the virtual serial port macOS creates when you pair the Pi.
 
 Usage:
-    python3 computer_client.py AA:BB:CC:DD:EE:FF    # Pi's BT MAC address
+    python3 client.py                          # auto-detect the Pi serial port
+    python3 client.py /dev/tty.raspberrypi     # use a specific port
 
-How to find the Pi's BT address:
-    On the Pi, run:  hciconfig hci0 | grep "BD Address"
+Setup:
+    1. Pair the Pi in System Settings → Bluetooth (one-time)
+    2. pip install pyserial uvloop
+    3. Run this script
 
-Install: pip install uvloop
+How it works:
+    When you pair a Bluetooth device that supports RFCOMM/SPP on macOS,
+    macOS creates a /dev/tty.* device automatically. Writing to that file
+    sends bytes over Bluetooth — no Bluetooth API needed.
 """
 
 import asyncio
+import glob
 import logging
 import signal
-import socket
 import sys
 import time
 
@@ -26,63 +32,99 @@ try:
 except ImportError:
     print("[boot] WARNING: uvloop not found — install with: pip install uvloop")
 
+try:
+    import serial
+    import serial.tools.list_ports
+except ImportError:
+    print("ERROR: pyserial not installed. Run: pip install pyserial")
+    sys.exit(1)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("host")
 
-RFCOMM_CHANNEL  = 1
-READ_SIZE       = 4096
-RECONNECT_DELAY = 3.0   # seconds between reconnect attempts
-CONNECT_TIMEOUT = 10.0  # seconds before giving up on a connection attempt
+BAUD_RATE       = 115200
+READ_TIMEOUT    = 0.1    # seconds — non-blocking serial read interval
+RECONNECT_DELAY = 3.0
+WRITE_TIMEOUT   = 2.0
 
 
-class HostClient:
-    def __init__(self, pi_addr: str):
-        self.pi_addr    = pi_addr
-        self.sock       = None
-        self.running    = False
+def find_pi_port() -> str | None:
+    """
+    Look for the Pi's virtual serial port.
+    macOS names these /dev/tty.<device-name> where the name comes from
+    the Bluetooth device name set on the Pi.
+    """
+    # Common patterns — sorted so the most specific match wins
+    patterns = [
+        "/dev/tty.raspberrypi*",
+        "/dev/tty.cubesat*",
+        "/dev/tty.BTSatellite*",
+        "/dev/tty.raspberry*",
+    ]
+    for pattern in patterns:
+        matches = glob.glob(pattern)
+        if matches:
+            return matches[0]
+
+    # Fallback: list all BT serial ports and let the user pick
+    bt_ports = [p.device for p in serial.tools.list_ports.comports()
+                if "Bluetooth" in (p.description or "") or p.device.startswith("/dev/tty.")]
+    if len(bt_ports) == 1:
+        return bt_ports[0]
+    if len(bt_ports) > 1:
+        print("Multiple Bluetooth serial ports found:")
+        for i, p in enumerate(bt_ports):
+            print(f"  [{i}] {p}")
+        choice = input("Pick one (number): ").strip()
+        try:
+            return bt_ports[int(choice)]
+        except (ValueError, IndexError):
+            pass
+
+    return None
+
+
+class MacClient:
+    def __init__(self, port: str):
+        self.port    = port
+        self.ser     = None
+        self.running = False
         self._send_q: asyncio.Queue | None = None
 
-    async def connect(self) -> bool:
-        """Open a non-blocking RFCOMM socket to the Pi. Returns True on success."""
-        sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        sock.setblocking(True)  # connect() itself must be blocking
-
-        log.info(f"Connecting to {self.pi_addr}:{RFCOMM_CHANNEL} ...")
-        loop = asyncio.get_running_loop()
+    def _open(self) -> bool:
         try:
-            await asyncio.wait_for(
-                loop.run_in_executor(None, sock.connect, (self.pi_addr, RFCOMM_CHANNEL)),
-                timeout=CONNECT_TIMEOUT,
+            self.ser = serial.Serial(
+                port=self.port,
+                baudrate=BAUD_RATE,
+                timeout=READ_TIMEOUT,         # read() returns after this many seconds
+                write_timeout=WRITE_TIMEOUT,
+                exclusive=True,               # prevent two processes opening the same port
             )
-            sock.setblocking(False)
-            self.sock = sock
-            log.info("Connected!")
+            log.info(f"Opened {self.port} at {BAUD_RATE} baud")
             return True
-        except asyncio.TimeoutError:
-            log.error(f"Timed out after {CONNECT_TIMEOUT}s")
-        except OSError as e:
-            log.error(f"Connection failed: {e}")
-        except Exception as e:
-            log.error(f"Unexpected error: {e}")
+        except serial.SerialException as e:
+            log.error(f"Could not open {self.port}: {e}")
+            return False
 
-        try:
-            sock.close()
-        except Exception:
-            pass
-        return False
+    def _close(self):
+        if self.ser and self.ser.is_open:
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+        self.ser = None
 
     async def run(self):
-        self.running  = True
-        self._send_q  = asyncio.Queue()
+        self.running = True
+        self._send_q = asyncio.Queue()
 
-        # Read stdin in a background thread so it never blocks the event loop
         input_task = asyncio.create_task(self._input_loop())
 
         while self.running:
-            if not await self.connect():
+            if not self._open():
                 log.info(f"Retrying in {RECONNECT_DELAY}s ...")
                 await asyncio.sleep(RECONNECT_DELAY)
                 continue
@@ -90,7 +132,6 @@ class HostClient:
             reader_task = asyncio.create_task(self._reader())
             writer_task = asyncio.create_task(self._writer())
 
-            # Run until either side drops
             done, pending = await asyncio.wait(
                 [reader_task, writer_task],
                 return_when=asyncio.FIRST_COMPLETED,
@@ -98,7 +139,7 @@ class HostClient:
             for t in pending:
                 t.cancel()
 
-            self._close_socket()
+            self._close()
 
             if self.running:
                 log.info(f"Connection lost. Reconnecting in {RECONNECT_DELAY}s ...")
@@ -107,47 +148,51 @@ class HostClient:
         input_task.cancel()
 
     async def _reader(self):
+        """Read from serial port in executor (serial.readline is blocking)."""
         loop = asyncio.get_running_loop()
         buf  = b""
-        while True:
+        while self.running and self.ser and self.ser.is_open:
             try:
-                chunk = await loop.sock_recv(self.sock, READ_SIZE)
-            except (ConnectionResetError, BrokenPipeError, OSError):
-                log.warning("Reader: connection lost")
+                # Run blocking read in a thread so we don't block the event loop
+                chunk = await loop.run_in_executor(None, self.ser.read, 4096)
+            except (serial.SerialException, OSError) as e:
+                log.warning(f"Reader error: {e}")
                 break
 
             if not chunk:
-                break
+                continue  # timeout, no data — loop again
 
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 line = line.strip()
                 if line and line != b"__ping__":
-                    # Clear the current "> " prompt, print response, redraw prompt
                     print(f"\r\033[K<< {line.decode('utf-8', errors='replace')}")
                     print(">> ", end="", flush=True)
 
     async def _writer(self):
-        while True:
+        """Pull from queue and write to serial port."""
+        loop = asyncio.get_running_loop()
+        while self.running:
             try:
                 msg: bytes = await asyncio.wait_for(self._send_q.get(), timeout=1.0)
             except asyncio.TimeoutError:
+                # Check if the port is still alive
+                if self.ser is None or not self.ser.is_open:
+                    break
                 continue
             except asyncio.CancelledError:
                 break
 
-            loop = asyncio.get_running_loop()
             try:
-                await loop.sock_sendall(self.sock, msg)
-            except (BrokenPipeError, OSError) as e:
-                log.warning(f"Writer: send failed: {e}")
+                await loop.run_in_executor(None, self.ser.write, msg)
+            except (serial.SerialException, OSError) as e:
+                log.warning(f"Writer error: {e}")
                 break
 
     async def _input_loop(self):
-        """Read lines from stdin and push them onto the send queue."""
         loop = asyncio.get_running_loop()
-        print(f"\nReady. Type a message and press Enter. Ctrl+C to quit.\n")
+        print(f"\nConnected via {self.port}. Type a message and press Enter. Ctrl+C to quit.\n")
 
         while self.running:
             try:
@@ -163,39 +208,52 @@ class HostClient:
             if line:
                 await self._send_q.put((line + "\n").encode("utf-8"))
 
-    def _close_socket(self):
-        if self.sock:
-            try:
-                self.sock.close()
-            except Exception:
-                pass
-            self.sock = None
-
     async def stop(self):
         self.running = False
-        self._close_socket()
+        self._close()
 
 
 async def main():
-    if len(sys.argv) != 2:
-        print("Usage: python3 computer_client.py AA:BB:CC:DD:EE:FF")
-        print()
-        print("To find the Pi's BT address, run on the Pi:")
-        print("  hciconfig hci0 | grep 'BD Address'")
-        sys.exit(1)
+    # Determine port
+    if len(sys.argv) >= 2:
+        port = sys.argv[1]
+        print(f"Using port: {port}")
+    else:
+        print("Searching for Pi serial port ...")
+        port = find_pi_port()
+        if not port:
+            print()
+            print("Could not find a Bluetooth serial port for the Pi.")
+            print()
+            print("Make sure you have:")
+            print("  1. Paired the Pi in System Settings → Bluetooth")
+            print("  2. The Pi server is running (sudo python3 pi_server.py)")
+            print()
+            print("Then check what port appeared:")
+            print("  ls /dev/tty.*")
+            print()
+            print("And pass it explicitly:")
+            print("  python3 client.py /dev/tty.raspberrypi")
+            sys.exit(1)
 
-    pi_addr = sys.argv[1].upper().strip()
-    client  = HostClient(pi_addr)
-    loop    = asyncio.get_running_loop()
+    client = MacClient(port)
+    loop   = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
 
     def shutdown(*_):
         print("\nShutting down ...")
-        loop.create_task(client.stop())
+        async def _stop():
+            await client.stop()
+            main_task.cancel()
+        loop.create_task(_stop())
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown)
 
-    await client.run()
+    try:
+        await client.run()
+    except asyncio.CancelledError:
+        pass
 
 
 if __name__ == "__main__":
