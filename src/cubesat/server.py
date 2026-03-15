@@ -47,8 +47,8 @@ class SatelliteServer:
         sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setblocking(False)
-        # empty string = BDADDR_ANY, bind to whichever BT adapter is present
-        sock.bind(("", RFCOMM_CHANNEL))
+        # BDADDR_ANY for AF_BLUETOOTH must be the all-zeros address string
+        sock.bind(("00:00:00:00:00:00", RFCOMM_CHANNEL))
         sock.listen(5)
         return sock
 
