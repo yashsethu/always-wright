@@ -456,8 +456,9 @@ class HeightMapApp(tk.Tk):
         ble_strip.pack(fill="x", padx=16, pady=(0, 8))
 
         self.ble_status = tk.StringVar(value="⬤  Disconnected")
-        tk.Label(ble_strip, textvariable=self.ble_status, bg=BG, fg="#ff4444",
-                font=FONT_SM).pack(side="left", padx=(0, 16))
+        self.ble_label = tk.Label(ble_strip, textvariable=self.ble_status, bg=BG, fg="#ff4444",
+            font=FONT_SM)
+        self.ble_label.pack(side="left", padx=(0, 16))
 
         self._make_btn(ble_strip, "▶  Stream",   lambda: self._ble_cmd('S')).pack(side="left", padx=4)
         self._make_btn(ble_strip, "■  Stop",     lambda: self._ble_cmd('X')).pack(side="left", padx=4)
@@ -1166,15 +1167,10 @@ class HeightMapApp(tk.Tk):
     def set_ble_connected(self, connected):
         if connected:
             self.ble_status.set("⬤  Connected")
-            self.nametowidget(self.ble_status.get())
-            # update label color to green
-            for w in self.winfo_children():
-                if isinstance(w, tk.Frame):
-                    for ww in w.winfo_children():
-                        if isinstance(ww, tk.Label) and ww.cget("textvariable") == str(self.ble_status):
-                            ww.config(fg="#39ff14")
+            self.ble_label.config(fg="#39ff14")
         else:
             self.ble_status.set("⬤  Disconnected")
+            self.ble_label.config(fg="#ff4444")
 
     def _ble_cmd(self, cmd):
         # Set by client.py after connecting
