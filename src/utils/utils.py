@@ -498,8 +498,7 @@ class HeightMapApp(tk.Tk):
             return
         img = cv2.imread(IMAGE_PATH)
         if img is None:
-            self.status_var.set(f"Error: could not load {IMAGE_PATH}")
-            return
+            return  # silently skip instead of showing error
         self.rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if self.view_var.get() == "Raw Feed":

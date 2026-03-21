@@ -76,8 +76,17 @@ def run_ble():
     ble_loop.close()
 
 if __name__ == '__main__':
-    Image.new('RGB', (160, 120), color=(30, 30, 30)).save(heightmap.IMAGE_PATH)
+    # Create placeholder before app starts so it never errors on load
+    from PIL import Image as PILImage
+    placeholder = PILImage.new('RGB', (160, 120), color=(20, 20, 20))
+    placeholder.save(heightmap.IMAGE_PATH)
+
     app = heightmap.HeightMapApp()
     app._send_ble_cmd = send_cmd
+
+    # Suppress the initial auto-load since we control when frames arrive
+    app.after_cancel(app.after(0, lambda: None))  # flush pending
+    app._processing = False  # reset any stuck state
+
     app.after(500, lambda: threading.Thread(target=run_ble, daemon=True).start())
     app.mainloop()
