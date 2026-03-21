@@ -96,7 +96,7 @@ def on_command(value, options):
     if cmd == b'C':
         log.info("Single capture triggered")
         t0 = time.time()
-        config = picam2.create_still_configuration(main={'size': (4608, 2592)})
+        config = picam2.create_still_configuration(main={'size': (1080, 720)})
         picam2.configure(config)
         data = capture_single()
         log.info(f"Captured {len(data):,} bytes in {time.time()-t0:.2f}s")

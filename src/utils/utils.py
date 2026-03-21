@@ -397,6 +397,9 @@ class HeightMapApp(tk.Tk):
         self._click_cid     = None
 
         self._pending_frame = None  # latest unprocessed frame
+        self._raw_fig = None
+
+        self.view_var = tk.StringVar(value="Raw Feed")
 
         self._build_ui()
         self._style_ttk()
@@ -507,6 +510,7 @@ class HeightMapApp(tk.Tk):
 
         if self.view_var.get() == "Raw Feed":
             if not hasattr(self, '_raw_fig') or self._raw_fig is None:
+                self._clear_canvas()  # ← add this line
                 self._raw_fig, self._raw_ax = plt.subplots(figsize=(6, 6), facecolor=BG)
                 self._raw_ax.set_facecolor(BG)
                 self._raw_im = self._raw_ax.imshow(self.rgb, origin="upper", aspect='auto')
@@ -520,7 +524,6 @@ class HeightMapApp(tk.Tk):
             self.status_var.set(f"Raw Feed  •  {self.rgb.shape[1]}x{self.rgb.shape[0]}")
             return
 
-        # For all other modes: store latest frame, start processing if not already running
         self._pending_frame = self.rgb.copy()
         if not self._processing:
             self._process_next_frame()
