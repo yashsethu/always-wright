@@ -26,7 +26,7 @@ stream_thread = None
 app    = peripheral.Peripheral(list(adapter.Adapter.available())[0].address, local_name='cubesat')
 picam2 = Picamera2()
 
-STREAM_RES  = (160, 120)   # change from 320x240
+STREAM_RES  = (1920, 1080)   # change from 320x240
 CHUNK_SIZE  = 512
 sending     = False        # add this global flag next to streaming
 
@@ -96,7 +96,7 @@ def on_command(value, options):
     if cmd == b'C':
         log.info("Single capture triggered")
         t0 = time.time()
-        config = picam2.create_still_configuration(main={'size': (1080, 720)})
+        config = picam2.create_still_configuration(main={'size': (1920, 1080)})
         picam2.configure(config)
         data = capture_single()
         log.info(f"Captured {len(data):,} bytes in {time.time()-t0:.2f}s")
