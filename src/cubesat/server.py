@@ -19,7 +19,8 @@ app.add_service(srv_id=1, uuid=SERVICE_UUID, primary=True)
 app.add_characteristic(
     srv_id=1, chr_id=1, uuid=CMD_UUID,
     value=[], notifying=False,
-    flags=['write', 'write-without-response']
+    flags=['write', 'write-without-response'],
+    write_callback=on_command
 )
 app.add_characteristic(
     srv_id=1, chr_id=2, uuid=DATA_UUID,
@@ -55,8 +56,6 @@ def on_command(value, options):
 
 app.add_descriptor(srv_id=1, chr_id=1, dsc_id=1, uuid='2901', value=list(b'Command'), flags=['read'])
 app.add_descriptor(srv_id=1, chr_id=2, dsc_id=1, uuid='2901', value=list(b'Data'),    flags=['read'])
-
-app.on_write_request(srv_id=1, chr_id=1, callback=on_command)
 
 log.info("BLE server started, waiting for connections...")
 app.publish()
