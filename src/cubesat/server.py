@@ -66,6 +66,7 @@ def stream_loop():
             if frame_count % 10 == 0:
                 fps = frame_count / (time.time() - t0)
                 log.info(f"Streaming: {fps:.1f} FPS  {len(data):,} bytes/frame")
+            log.info(f"Sending frame {frame_count}: {len(data):,} bytes")
     finally:
         picam2.stop()
         log.info("Stream stopped")
