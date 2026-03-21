@@ -503,15 +503,20 @@ class HeightMapApp(tk.Tk):
         self.rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if self.view_var.get() == "Raw Feed":
-            plt.close("all")
-            self._clear_canvas()
-            fig, ax = plt.subplots(figsize=(6, 6), facecolor=BG)
-            ax.set_facecolor(BG)
-            ax.imshow(self.rgb, origin="upper")
-            ax.axis("off")
-            fig.tight_layout(pad=0)
-            self.current_fig = fig
-            self._embed_figure(fig)
+            if not hasattr(self, '_raw_fig') or self._raw_fig is None:
+                # First time — create the figure
+                self._raw_fig, self._raw_ax = plt.subplots(figsize=(6, 6), facecolor=BG)
+                self._raw_ax.set_facecolor(BG)
+                self._raw_im = self._raw_ax.imshow(self.rgb, origin="upper")
+                self._raw_ax.axis("off")
+                self._raw_fig.tight_layout(pad=0)
+                self.current_fig = self._raw_fig
+                self._embed_figure(self._raw_fig)
+            else:
+                # Subsequent frames — just update the image data, no redraw
+                self._raw_im.set_data(self.rgb)
+                self._raw_fig.canvas.draw_idle()
+            self.status_var.set(f"Raw Feed  •  {self.rgb.shape[1]}x{self.rgb.shape[0]}")
             return
 
         fname = IMAGE_PATH.replace("\\", "/").split("/")[-1]
@@ -557,6 +562,7 @@ class HeightMapApp(tk.Tk):
     # ── view rendering ────────────────────────────────────────────────────────
 
     def _on_dropdown_change(self, _event=None):
+        self._raw_fig = None  # add this line
         self._deactivate_path_mode()
         self._refresh_view()
 
