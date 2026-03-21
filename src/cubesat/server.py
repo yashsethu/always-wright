@@ -1,54 +1,62 @@
 import struct
-from picamera2 import Picamera2
 import io
-from datetime import datetime
-import os
-import time
+import logging
+from bluezero import peripheral, adapter
+from picamera2 import Picamera2
 
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S.%f')}] {msg}", flush=True)
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+SERVICE_UUID  = '12345678-1234-5678-1234-56789abcdef0'
+CMD_UUID      = '12345678-1234-5678-1234-56789abcdef1'
+DATA_UUID     = '12345678-1234-5678-1234-56789abcdef2'
+
+CHUNK_SIZE = 512
+
+app = peripheral.Peripheral(list(adapter.Adapter.available())[0].address, local_name='cubesat')
+app.add_service(srv_id=1, uuid=SERVICE_UUID, primary=True)
+
+app.add_characteristic(
+    srv_id=1, chr_id=1, uuid=CMD_UUID,
+    value=[], notifying=False,
+    flags=['write', 'write-without-response']
+)
+app.add_characteristic(
+    srv_id=1, chr_id=2, uuid=DATA_UUID,
+    value=[], notifying=False,
+    flags=['notify']
+)
 
 def capture_image():
-    log("Initializing camera...")
+    log.info("Capturing image...")
     picam2 = Picamera2()
     picam2.start()
-    log("Camera started, capturing...")
     buf = io.BytesIO()
     picam2.capture_file(buf, format='jpeg')
     picam2.stop()
     data = buf.getvalue()
-    log(f"Capture complete, {len(data)} bytes")
+    log.info(f"Captured {len(data)} bytes")
     return data
 
-log("Server started, waiting for /dev/rfcomm0...")
-while True:
-    try:
-        if not os.path.exists('/dev/rfcomm0'):
-            log("No device, retrying in 5 seconds...")
-            time.sleep(5)
-            continue
+def on_command(value, options):
+    cmd = bytes(value)
+    log.info(f"Received command: {repr(cmd)}")
+    if cmd == b'C':
+        data = capture_image()
+        size = len(data)
+        # Send size header first
+        app.update_value(srv_id=1, chr_id=2, value=list(struct.pack('>I', size)))
+        # Send image in chunks
+        for i in range(0, size, CHUNK_SIZE):
+            chunk = data[i:i+CHUNK_SIZE]
+            app.update_value(srv_id=1, chr_id=2, value=list(chunk))
+            log.info(f"Sent chunk {i//CHUNK_SIZE + 1}/{(size+CHUNK_SIZE-1)//CHUNK_SIZE}")
+        log.info("Transfer complete")
 
-        log("Opening /dev/rfcomm0 as raw fd...")
-        fd = open('/dev/rfcomm0', 'r+b', buffering=0)
-        log("Opened, waiting for commands...")
+app.add_descriptor(srv_id=1, chr_id=1, dsc_id=1, uuid='2901', value=list(b'Command'), flags=['read'])
+app.add_descriptor(srv_id=1, chr_id=2, dsc_id=1, uuid='2901', value=list(b'Data'),    flags=['read'])
 
-        while True:
-            log("Blocking on read...")
-            cmd = fd.read(1)
-            log(f"Read returned: {repr(cmd)}")
-            if cmd == b'C':
-                log("Capture triggered!")
-                data = capture_image()
-                size = len(data)
-                log(f"Sending size header: {size}")
-                fd.write(struct.pack('>I', size))
-                log("Sending image data...")
-                fd.write(data)
-                log(f"Done sending {size} bytes")
-            elif cmd == b'Q' or not cmd:
-                log("Disconnected or empty read, exiting")
-                fd.close()
-                break
-    except Exception as e:
-        log(f"Error: {e}, retrying in 5 seconds...")
-        time.sleep(5)
+app.on_write_request(srv_id=1, chr_id=1, callback=on_command)
+
+log.info("BLE server started, waiting for connections...")
+app.publish()

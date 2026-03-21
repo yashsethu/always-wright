@@ -1,51 +1,52 @@
-import serial
+import asyncio
 import struct
 import os
 from datetime import datetime
+from bleak import BleakClient, BleakScanner
 
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S.%f')}] {msg}", flush=True)
+SERVICE_UUID  = '12345678-1234-5678-1234-56789abcdef0'
+CMD_UUID      = '12345678-1234-5678-1234-56789abcdef1'
+DATA_UUID     = '12345678-1234-5678-1234-56789abcdef2'
 
 SAVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'images')
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-log("Opening serial port...")
-sock = serial.Serial('/dev/cu.cubesat', 115200, timeout=30)
-log("Serial port open")
-print("Press Enter to capture, q to quit.")
+image_buffer = bytearray()
+expected_size = None
 
-while True:
-    cmd = input("> ").strip().lower()
-    if cmd == 'q':
-        log("Sending Q...")
-        sock.write(b'Q')
-        break
+def on_data(sender, data):
+    global image_buffer, expected_size
+    if expected_size is None and len(data) == 4:
+        expected_size = struct.unpack('>I', bytes(data))[0]
+        image_buffer = bytearray()
+        print(f"[INFO] Expecting {expected_size} bytes...")
     else:
-        log("Sending C byte...")
-        sock.write(b'C')
-        sock.flush()
-        log("C sent, waiting for size header...")
+        image_buffer.extend(data)
+        print(f"[INFO] Received {len(image_buffer)}/{expected_size} bytes", end='\r')
+        if expected_size and len(image_buffer) >= expected_size:
+            filename = os.path.join(SAVE_DIR, f"capture_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
+            with open(filename, 'wb') as f:
+                f.write(image_buffer[:expected_size])
+            print(f"\n[INFO] Saved {filename}")
+            expected_size = None
+            image_buffer = bytearray()
 
-        raw_size = sock.read(4)
-        log(f"Size header received: {repr(raw_size)} ({len(raw_size)} bytes)")
-        if len(raw_size) < 4:
-            log("ERROR: Timeout waiting for size header")
-            continue
-        size = struct.unpack('>I', raw_size)[0]
-        log(f"Expecting {size} bytes of image data...")
+async def main():
+    print("[INFO] Scanning for cubesat...")
+    device = await BleakScanner.find_device_by_name("cubesat", timeout=10)
+    if not device:
+        print("[ERROR] cubesat not found")
+        return
 
-        data = b''
-        while len(data) < size:
-            chunk = sock.read(min(4096, size - len(data)))
-            log(f"Got chunk: {len(chunk)} bytes (total: {len(data)+len(chunk)}/{size})")
-            if not chunk:
-                log("ERROR: Connection lost mid-transfer")
+    async with BleakClient(device) as client:
+        print("[INFO] Connected. Press Enter to capture, q to quit.")
+        await client.start_notify(DATA_UUID, on_data)
+        while True:
+            cmd = input("> ").strip().lower()
+            if cmd == 'q':
                 break
-            data += chunk
+            else:
+                print("[INFO] Triggering capture...")
+                await client.write_gatt_char(CMD_UUID, b'C', response=False)
 
-        filename = os.path.join(SAVE_DIR, f"capture_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
-        with open(filename, 'wb') as f:
-            f.write(data)
-        log(f"Saved {filename}")
-
-sock.close()
+asyncio.run(main())
