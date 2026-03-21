@@ -16,7 +16,11 @@ while True:
         break
     else:
         print("Capturing...")
-        sock.write(b'C')
+        print("Sending C byte...")
+        bytes_written = sock.write(b'C')
+        sock.flush()
+        print(f"Sent {bytes_written} bytes")
+        raw_size = sock.read(4)
 
         raw_size = sock.read(4)
         if len(raw_size) < 4:

@@ -20,7 +20,9 @@ while True:
             time.sleep(5)
             continue
         ser = serial.Serial('/dev/rfcomm0', 115200, timeout=60)
-        print("Connected, waiting for commands...")
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        print("Connected, waiting for commands...") 
         while True:
             cmd = ser.read(1)
             print(f"Received: {repr(cmd)}")
