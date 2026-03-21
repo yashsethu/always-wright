@@ -23,6 +23,7 @@ while True:
         print("Connected, waiting for commands...")
         while True:
             cmd = ser.read(1)
+            print(f"Received: {repr(cmd)}")
             if cmd == b'C':
                 print("Capture triggered!")
                 data = capture_image()
