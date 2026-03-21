@@ -501,8 +501,7 @@ class HeightMapApp(tk.Tk):
             self.status_var.set(f"Error: could not load {IMAGE_PATH}")
             return
         self.rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        # Show raw immediately if in Raw Feed mode
+
         if self.view_var.get() == "Raw Feed":
             plt.close("all")
             self._clear_canvas()
@@ -513,7 +512,7 @@ class HeightMapApp(tk.Tk):
             fig.tight_layout(pad=0)
             self.current_fig = fig
             self._embed_figure(fig)
-            return  # skip heavy processing in raw mode
+            return
 
         fname = IMAGE_PATH.replace("\\", "/").split("/")[-1]
         self.status_var.set(f"{fname}  •  processing...")
@@ -588,8 +587,8 @@ class HeightMapApp(tk.Tk):
         else:
             fig = make_topographic(self.ensemble)
 
-    self.current_fig = fig
-    self._embed_figure(fig)
+        self.current_fig = fig
+        self._embed_figure(fig)
 
     def _clear_canvas(self):
         if self._click_cid is not None and self.current_fig is not None:
