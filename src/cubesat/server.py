@@ -1,4 +1,4 @@
-import serial
+import bluetooth
 import struct
 from picamera2 import Picamera2
 import io
@@ -12,35 +12,32 @@ def capture_image():
     picam2.stop()
     return buf.getvalue()
 
-print("Waiting for connection on /dev/rfcomm0...")
+server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+server_sock.bind(("", 1))
+server_sock.listen(1)
+
+bluetooth.advertise_service(server_sock, "CameraServer",
+    service_classes=[bluetooth.SERIAL_PORT_CLASS],
+    profiles=[bluetooth.SERIAL_PORT_PROFILE])
+
+print("Waiting for connection...")
 while True:
     try:
-        ser = serial.Serial('/dev/rfcomm0', 115200, timeout=60)
-        print("Mac connected, waiting for commands...")
+        client_sock, address = server_sock.accept()
+        print(f"Connected: {address}")
         while True:
-            cmd = ser.read(1)
+            cmd = client_sock.recv(1)
             if cmd == b'C':
                 print("Capture triggered!")
                 data = capture_image()
                 size = len(data)
-                ser.write(struct.pack('>I', size))
-                ser.write(data)
+                client_sock.send(struct.pack('>I', size))
+                client_sock.send(data)
                 print(f"Sent {size} bytes")
-            elif cmd == b'Q':
-                print("Mac disconnected")
+            elif cmd == b'Q' or not cmd:
+                print("Disconnected")
                 break
-            elif cmd == b'':
-                # timeout with no data, check connection is still alive
-                continue
-    except serial.SerialException:
-        # no connection yet, wait and retry
-        print("No connection, retrying in 5 seconds...")
-        time.sleep(5)
+        client_sock.close()
     except Exception as e:
-        print(f"Unexpected error: {e}, retrying in 5 seconds...")
+        print(f"Error: {e}, retrying in 5 seconds...")
         time.sleep(5)
-    finally:
-        try:
-            ser.close()
-        except:
-            pass
