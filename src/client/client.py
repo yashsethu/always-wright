@@ -22,7 +22,6 @@ while True:
         print(f"Sent {bytes_written} bytes")
         raw_size = sock.read(4)
 
-        raw_size = sock.read(4)
         if len(raw_size) < 4:
             print("Timeout or connection lost")
             continue
