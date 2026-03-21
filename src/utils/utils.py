@@ -451,6 +451,18 @@ class HeightMapApp(tk.Tk):
         b4.pack(side="left", expand=True, fill="x", padx=5)
         self.action_btns.append(b4)
 
+        # BLE controls
+        ble_strip = tk.Frame(self, bg=BG, pady=6)
+        ble_strip.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.ble_status = tk.StringVar(value="⬤  Disconnected")
+        tk.Label(ble_strip, textvariable=self.ble_status, bg=BG, fg="#ff4444",
+                font=FONT_SM).pack(side="left", padx=(0, 16))
+
+        self._make_btn(ble_strip, "▶  Stream",   lambda: self._ble_cmd('S')).pack(side="left", padx=4)
+        self._make_btn(ble_strip, "■  Stop",     lambda: self._ble_cmd('X')).pack(side="left", padx=4)
+        self._make_btn(ble_strip, "⏎  Capture",  lambda: self._ble_cmd('C')).pack(side="left", padx=4)
+
     def _style_ttk(self):
         s = ttk.Style(self)
         s.theme_use("clam")
@@ -1150,6 +1162,24 @@ class HeightMapApp(tk.Tk):
         self.status_var.set(
             self.status_var.get().split("•")[0].strip()
             + f"  •  {s_pct:.0f}% safe / {d_pct:.0f}% danger")
+    
+    def set_ble_connected(self, connected):
+        if connected:
+            self.ble_status.set("⬤  Connected")
+            self.nametowidget(self.ble_status.get())
+            # update label color to green
+            for w in self.winfo_children():
+                if isinstance(w, tk.Frame):
+                    for ww in w.winfo_children():
+                        if isinstance(ww, tk.Label) and ww.cget("textvariable") == str(self.ble_status):
+                            ww.config(fg="#39ff14")
+        else:
+            self.ble_status.set("⬤  Disconnected")
+
+    def _ble_cmd(self, cmd):
+        # Set by client.py after connecting
+        if hasattr(self, '_send_ble_cmd'):
+            self._send_ble_cmd(cmd)
 
 
 # ─────────────────────────────── entry ────────────────────────────────────────
