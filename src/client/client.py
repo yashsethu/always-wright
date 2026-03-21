@@ -10,7 +10,7 @@ SAVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'images')
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 log("Opening serial port...")
-sock = serial.Serial('/dev/tty.cubesat', 115200, timeout=30)
+sock = serial.Serial('/dev/cu.cubesat', 115200, timeout=30)
 log("Serial port open")
 print("Press Enter to capture, q to quit.")
 
