@@ -54,7 +54,7 @@ def capture_single(res=CAPTURE_RES):
 
 def capture_stream_frame():
     buf = io.BytesIO()
-    picam2.capture_file(buf, format='jpeg', quality=50)
+    picam2.capture_file(buf, format='jpeg')
     return buf.getvalue()
 
 def stream_loop():
