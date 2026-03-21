@@ -1,18 +1,19 @@
 import struct
 import io
 import logging
+import time
 from bluezero import peripheral, adapter
 from picamera2 import Picamera2
-import time
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-SERVICE_UUID  = '12345678-1234-5678-1234-56789abcdef0'
-CMD_UUID      = '12345678-1234-5678-1234-56789abcdef1'
-DATA_UUID     = '12345678-1234-5678-1234-56789abcdef2'
+SERVICE_UUID = '12345678-1234-5678-1234-56789abcdef0'
+CMD_UUID     = '12345678-1234-5678-1234-56789abcdef1'
+DATA_UUID    = '12345678-1234-5678-1234-56789abcdef2'
 
 CHUNK_SIZE = 512
+data_char = None
 
 app = peripheral.Peripheral(list(adapter.Adapter.available())[0].address, local_name='cubesat')
 
@@ -27,19 +28,32 @@ def capture_image():
     log.info(f"Captured {len(data)} bytes")
     return data
 
+def on_notify(notifying, characteristic):
+    global data_char
+    if notifying:
+        log.info("Mac subscribed to notifications, storing characteristic reference")
+        data_char = characteristic
+    else:
+        log.info("Mac unsubscribed")
+        data_char = None
+
 def on_command(value, options):
+    global data_char
     cmd = bytes(value)
     log.info(f"Received command: {repr(cmd)}")
     if cmd == b'C':
+        if data_char is None:
+            log.error("No notification subscriber yet!")
+            return
         data = capture_image()
         size = len(data)
         try:
             log.info(f"Sending size header: {size}")
-            app.chars[1][2].set_value(list(struct.pack('>I', size)))
+            data_char.value = list(struct.pack('>I', size))
             time.sleep(0.1)
             for i in range(0, size, CHUNK_SIZE):
                 chunk = data[i:i+CHUNK_SIZE]
-                app.chars[1][2].set_value(list(chunk))
+                data_char.value = list(chunk)
                 time.sleep(0.05)
                 log.info(f"Sent chunk {i//CHUNK_SIZE + 1}/{(size+CHUNK_SIZE-1)//CHUNK_SIZE}")
             log.info("Transfer complete")
@@ -55,8 +69,9 @@ app.add_characteristic(
 )
 app.add_characteristic(
     srv_id=1, chr_id=2, uuid=DATA_UUID,
-    value=[], notifying=False,
-    flags=['notify']
+    value=[], notifying=True,
+    flags=['notify'],
+    notify_callback=on_notify
 )
 app.add_descriptor(srv_id=1, chr_id=1, dsc_id=1, uuid='2901', value=list(b'Command'), flags=['read'])
 app.add_descriptor(srv_id=1, chr_id=2, dsc_id=1, uuid='2901', value=list(b'Data'),    flags=['read'])
