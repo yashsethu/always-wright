@@ -35,11 +35,11 @@ def on_command(value, options):
         size = len(data)
         try:
             log.info(f"Sending size header: {size}")
-            app.update_value(srv_id=1, chr_id=2, value=list(struct.pack('>I', size)))
+            app.chars[1][2].set_value(list(struct.pack('>I', size)))
             time.sleep(0.1)
             for i in range(0, size, CHUNK_SIZE):
                 chunk = data[i:i+CHUNK_SIZE]
-                app.update_value(srv_id=1, chr_id=2, value=list(chunk))
+                app.chars[1][2].set_value(list(chunk))
                 time.sleep(0.05)
                 log.info(f"Sent chunk {i//CHUNK_SIZE + 1}/{(size+CHUNK_SIZE-1)//CHUNK_SIZE}")
             log.info("Transfer complete")
