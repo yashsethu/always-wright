@@ -33,14 +33,18 @@ def on_command(value, options):
     if cmd == b'C':
         data = capture_image()
         size = len(data)
-        app.update_value(srv_id=1, chr_id=2, value=list(struct.pack('>I', size)))
-        time.sleep(0.1)
-        for i in range(0, size, CHUNK_SIZE):
-            chunk = data[i:i+CHUNK_SIZE]
-            app.update_value(srv_id=1, chr_id=2, value=list(chunk))
-            time.sleep(0.05)
-            log.info(f"Sent chunk {i//CHUNK_SIZE + 1}/{(size+CHUNK_SIZE-1)//CHUNK_SIZE}")
-        log.info("Transfer complete")
+        try:
+            log.info(f"Sending size header: {size}")
+            app.update_value(srv_id=1, chr_id=2, value=list(struct.pack('>I', size)))
+            time.sleep(0.1)
+            for i in range(0, size, CHUNK_SIZE):
+                chunk = data[i:i+CHUNK_SIZE]
+                app.update_value(srv_id=1, chr_id=2, value=list(chunk))
+                time.sleep(0.05)
+                log.info(f"Sent chunk {i//CHUNK_SIZE + 1}/{(size+CHUNK_SIZE-1)//CHUNK_SIZE}")
+            log.info("Transfer complete")
+        except Exception as e:
+            log.error(f"Failed to send: {e}", exc_info=True)
 
 app.add_service(srv_id=1, uuid=SERVICE_UUID, primary=True)
 app.add_characteristic(
