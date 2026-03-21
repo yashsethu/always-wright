@@ -2,6 +2,7 @@ import serial
 import struct
 from picamera2 import Picamera2
 import io
+import time
 
 def capture_image():
     picam2 = Picamera2()
@@ -18,18 +19,26 @@ while True:
         print("Mac connected, waiting for commands...")
         while True:
             cmd = ser.read(1)
-            if cmd == b'C':  # Capture command
+            if cmd == b'C':
                 print("Capture triggered!")
                 data = capture_image()
                 size = len(data)
                 ser.write(struct.pack('>I', size))
                 ser.write(data)
                 print(f"Sent {size} bytes")
-            elif cmd == b'Q':  # Quit command
+            elif cmd == b'Q':
                 print("Mac disconnected")
                 break
+            elif cmd == b'':
+                # timeout with no data, check connection is still alive
+                continue
+    except serial.SerialException:
+        # no connection yet, wait and retry
+        print("No connection, retrying in 5 seconds...")
+        time.sleep(5)
     except Exception as e:
-        print(f"Error: {e}, restarting...")
+        print(f"Unexpected error: {e}, retrying in 5 seconds...")
+        time.sleep(5)
     finally:
         try:
             ser.close()
