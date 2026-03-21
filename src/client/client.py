@@ -3,42 +3,49 @@ import struct
 import os
 from datetime import datetime
 
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')}] {msg}", flush=True)
+
 SAVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'images')
 os.makedirs(SAVE_DIR, exist_ok=True)
 
+log("Opening serial port...")
 sock = serial.Serial('/dev/tty.cubesat', 115200, timeout=30)
-print("Connected. Press Enter to capture, q to quit.")
+log("Serial port open")
+print("Press Enter to capture, q to quit.")
 
 while True:
     cmd = input("> ").strip().lower()
     if cmd == 'q':
+        log("Sending Q...")
         sock.write(b'Q')
         break
     else:
-        print("Capturing...")
-        print("Sending C byte...")
-        bytes_written = sock.write(b'C')
+        log("Sending C byte...")
+        sock.write(b'C')
         sock.flush()
-        print(f"Sent {bytes_written} bytes")
-        raw_size = sock.read(4)
+        log("C sent, waiting for size header...")
 
+        raw_size = sock.read(4)
+        log(f"Size header received: {repr(raw_size)} ({len(raw_size)} bytes)")
         if len(raw_size) < 4:
-            print("Timeout or connection lost")
+            log("ERROR: Timeout waiting for size header")
             continue
         size = struct.unpack('>I', raw_size)[0]
-        print(f"Receiving {size} bytes...")
+        log(f"Expecting {size} bytes of image data...")
 
         data = b''
         while len(data) < size:
             chunk = sock.read(min(4096, size - len(data)))
+            log(f"Got chunk: {len(chunk)} bytes (total: {len(data)+len(chunk)}/{size})")
             if not chunk:
-                print("Connection lost mid-transfer")
+                log("ERROR: Connection lost mid-transfer")
                 break
             data += chunk
 
         filename = os.path.join(SAVE_DIR, f"capture_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
         with open(filename, 'wb') as f:
             f.write(data)
-        print(f"Saved {filename}")
+        log(f"Saved {filename}")
 
 sock.close()
