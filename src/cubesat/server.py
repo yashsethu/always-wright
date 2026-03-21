@@ -33,7 +33,7 @@ sending     = False        # add this global flag next to streaming
 def send_frame(data):
     global sending
     if data_char is None or sending:
-        return            # drop frame if still sending previous one
+        return
     sending = True
     try:
         size = len(data)
@@ -96,6 +96,8 @@ def on_command(value, options):
     if cmd == b'C':
         log.info("Single capture triggered")
         t0 = time.time()
+        config = picam2.create_still_configuration(main={'size': (4608, 2592)})
+        picam2.configure(config)
         data = capture_single()
         log.info(f"Captured {len(data):,} bytes in {time.time()-t0:.2f}s")
         send_frame(data)
