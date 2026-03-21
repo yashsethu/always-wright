@@ -2,7 +2,7 @@ import serial
 import struct
 from datetime import datetime
 
-ser = serial.Serial('/dev/tty.cubesat-SerialPort', 115200, timeout=30)
+ser = serial.Serial('/dev/tty.cubesat', 115200, timeout=30)
 print("Connected to Pi. Press Enter to capture, q to quit.")
 
 while True:
