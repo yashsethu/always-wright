@@ -25,7 +25,7 @@ console       = Console()
 image_buffer  = bytearray()
 expected_size = None
 transfer_start = None
-frame_queue   = queue.Queue(maxsize=2)  # small buffer so display stays live
+frame_queue = queue.Queue(maxsize=1) 
 
 # ── Tkinter display window ────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ class LiveView(tk.Tk):
             while True:
                 frame_bytes = frame_queue.get_nowait()
                 img = Image.open(BytesIO(frame_bytes))
-                img = img.resize((640, 480), Image.LANCZOS)
+                img = img.resize((480, 360), Image.NEAREST)  # NEAREST is faster than LANCZOS
                 photo = ImageTk.PhotoImage(img)
                 self.label.configure(image=photo)
                 self.label.image = photo  # keep reference
@@ -84,7 +84,12 @@ def on_data(sender, data):
         frame = bytes(image_buffer[:expected_size])
 
         if streaming:
-            # Push to live view, drop frame if display is behind
+            # Always discard old frame and show newest
+            while not frame_queue.empty():
+                try:
+                    frame_queue.get_nowait()
+                except queue.Empty:
+                    break
             try:
                 frame_queue.put_nowait(frame)
             except queue.Full:

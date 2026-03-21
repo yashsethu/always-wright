@@ -17,8 +17,6 @@ SERVICE_UUID = '12345678-1234-5678-1234-56789abcdef0'
 CMD_UUID     = '12345678-1234-5678-1234-56789abcdef1'
 DATA_UUID    = '12345678-1234-5678-1234-56789abcdef2'
 
-CHUNK_SIZE   = 512
-STREAM_RES   = (320, 240)  # lower res for speed
 CAPTURE_RES  = (1920, 1080)  # full res for single captures
 
 data_char  = None
@@ -28,13 +26,22 @@ stream_thread = None
 app    = peripheral.Peripheral(list(adapter.Adapter.available())[0].address, local_name='cubesat')
 picam2 = Picamera2()
 
+STREAM_RES  = (160, 120)   # change from 320x240
+CHUNK_SIZE  = 512
+sending     = False        # add this global flag next to streaming
+
 def send_frame(data):
-    if data_char is None:
-        return
-    size = len(data)
-    data_char.set_value(list(struct.pack('>I', size)))
-    for i in range(0, size, CHUNK_SIZE):
-        data_char.set_value(list(data[i:i + CHUNK_SIZE]))
+    global sending
+    if data_char is None or sending:
+        return            # drop frame if still sending previous one
+    sending = True
+    try:
+        size = len(data)
+        data_char.set_value(list(struct.pack('>I', size)))
+        for i in range(0, size, CHUNK_SIZE):
+            data_char.set_value(list(data[i:i + CHUNK_SIZE]))
+    finally:
+        sending = False
 
 def capture_single(res=CAPTURE_RES):
     config = picam2.create_still_configuration(main={'size': res})
@@ -47,7 +54,7 @@ def capture_single(res=CAPTURE_RES):
 
 def capture_stream_frame():
     buf = io.BytesIO()
-    picam2.capture_file(buf, format='jpeg')
+    picam2.capture_file(buf, format='jpeg', quality=50)
     return buf.getvalue()
 
 def stream_loop():
