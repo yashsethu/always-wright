@@ -69,7 +69,7 @@ app.add_characteristic(
 )
 app.add_characteristic(
     srv_id=1, chr_id=2, uuid=DATA_UUID,
-    value=[], notifying=True,
+    value=[], notifying=False,
     flags=['notify'],
     notify_callback=on_notify
 )
