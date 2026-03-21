@@ -51,11 +51,9 @@ def on_command(value, options):
         try:
             log.info(f"Sending size header: {size}")
             data_char.set_value(list(struct.pack('>I', size)))
-            time.sleep(0.1)
             for i in range(0, size, CHUNK_SIZE):
                 chunk = data[i:i+CHUNK_SIZE]
                 data_char.set_value(list(chunk))
-                time.sleep(0.05)
                 log.info(f"Sent chunk {i//CHUNK_SIZE + 1}/{(size+CHUNK_SIZE-1)//CHUNK_SIZE}")
             log.info("Transfer complete")
         except Exception as e:

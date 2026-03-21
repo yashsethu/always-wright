@@ -15,7 +15,7 @@ image_buffer = bytearray()
 expected_size = None
 
 def on_data(sender, data):
-    print(f"[DEBUG] on_data called: {len(data)} bytes, {repr(bytes(data)[:10])}")
+    print(f"[DEBUG] on_data called: {len(data)} bytes")
     global image_buffer, expected_size
     if expected_size is None and len(data) == 4:
         expected_size = struct.unpack('>I', bytes(data))[0]
@@ -50,8 +50,11 @@ async def main():
         print("[DEBUG] Notifications subscribed")
         print("[INFO] Connected. Press Enter to capture, q to quit.")
 
+        loop = asyncio.get_event_loop()
         while True:
-            cmd = input("> ").strip().lower()
+            # Run input() in a thread so it doesn't block the event loop
+            cmd = await loop.run_in_executor(None, input, "> ")
+            cmd = cmd.strip().lower()
             if cmd == 'q':
                 break
             else:
