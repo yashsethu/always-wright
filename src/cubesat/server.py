@@ -1,11 +1,12 @@
-import sys
 import struct
 from picamera2 import Picamera2
 import io
 from datetime import datetime
+import os
+import time
 
 def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S.%f')}] {msg}", file=sys.stderr, flush=True)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')}] {msg}", flush=True)
 
 def capture_image():
     log("Initializing camera...")
@@ -19,25 +20,35 @@ def capture_image():
     log(f"Capture complete, {len(data)} bytes")
     return data
 
-inp = sys.stdin.buffer
-out = sys.stdout.buffer
-
-log("Server started, waiting for commands on stdin...")
+log("Server started, waiting for /dev/rfcomm0...")
 while True:
-    log("Blocking on read...")
-    cmd = inp.read(1)
-    log(f"Read returned: {repr(cmd)}")
-    if cmd == b'C':
-        log("Capture triggered!")
-        data = capture_image()
-        size = len(data)
-        log(f"Sending size header: {size}")
-        out.write(struct.pack('>I', size))
-        out.flush()
-        log("Sending image data...")
-        out.write(data)
-        out.flush()
-        log(f"Done sending {size} bytes")
-    elif cmd == b'Q' or not cmd:
-        log("Disconnected or empty read, exiting")
-        break
+    try:
+        if not os.path.exists('/dev/rfcomm0'):
+            log("No device, retrying in 5 seconds...")
+            time.sleep(5)
+            continue
+
+        log("Opening /dev/rfcomm0 as raw fd...")
+        fd = open('/dev/rfcomm0', 'r+b', buffering=0)
+        log("Opened, waiting for commands...")
+
+        while True:
+            log("Blocking on read...")
+            cmd = fd.read(1)
+            log(f"Read returned: {repr(cmd)}")
+            if cmd == b'C':
+                log("Capture triggered!")
+                data = capture_image()
+                size = len(data)
+                log(f"Sending size header: {size}")
+                fd.write(struct.pack('>I', size))
+                log("Sending image data...")
+                fd.write(data)
+                log(f"Done sending {size} bytes")
+            elif cmd == b'Q' or not cmd:
+                log("Disconnected or empty read, exiting")
+                fd.close()
+                break
+    except Exception as e:
+        log(f"Error: {e}, retrying in 5 seconds...")
+        time.sleep(5)
