@@ -424,16 +424,20 @@ class HeightMapApp(tk.Tk):
         self.dropdown.pack(side="left")
         self.dropdown.bind("<<ComboboxSelected>>", self._on_dropdown_change)
 
-        self.map_frame = tk.Frame(self, bg=PANEL_BG, bd=0,
-                                  highlightthickness=1, highlightbackground="#333")
-        self.map_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        # With this — wrap in a container that reserves space for buttons:
+        container = tk.Frame(self, bg=BG)
+        container.pack(fill="both", expand=True, padx=16, pady=(0, 4))
+
+        self.map_frame = tk.Frame(container, bg=PANEL_BG, bd=0,
+                                highlightthickness=1, highlightbackground="#333")
+        self.map_frame.pack(fill="both", expand=True)
         self.placeholder = tk.Label(self.map_frame, text="Loading...",
                                     bg=PANEL_BG, fg=FG_DIM, font=("Helvetica", 15))
         self.placeholder.place(relx=0.5, rely=0.5, anchor="center")
         self.progress = ttk.Progressbar(self.map_frame, mode="indeterminate", length=300)
 
-        btn_strip = tk.Frame(self, bg=BG, pady=10)
-        btn_strip.pack(fill="x", padx=16, pady=(0, 12))
+        btn_strip = tk.Frame(container, bg=BG, pady=6)
+        btn_strip.pack(fill="x", pady=(4, 0))
         self.action_btns = []
 
         b1 = self._make_btn(btn_strip, "Path Finder", self._activate_path_mode)
@@ -454,8 +458,8 @@ class HeightMapApp(tk.Tk):
         self.action_btns.append(b4)
 
         # BLE controls
-        ble_strip = tk.Frame(self, bg=BG, pady=6)
-        ble_strip.pack(fill="x", padx=16, pady=(0, 8))
+        ble_strip = tk.Frame(container, bg=BG, pady=4)
+        ble_strip.pack(fill="x")
 
         self.ble_status = tk.StringVar(value="⬤  Disconnected")
         self.ble_label = tk.Label(ble_strip, textvariable=self.ble_status, bg=BG, fg="#ff4444",
@@ -599,7 +603,13 @@ class HeightMapApp(tk.Tk):
         if mode == "2D Height Map":
             fig = make_heightmap_2d(self.ensemble)
         elif mode == "3D Interactive":
-            fig = make_3d_surface(self.ensemble, SMOOTH_3D, DOWNSAMPLE, GAMMA, HEIGHT_RANGE)
+            try:
+                fig = make_3d_surface(self.ensemble, SMOOTH_3D, DOWNSAMPLE, GAMMA, HEIGHT_RANGE)
+            except Exception as e:
+                print(f"[3D] Failed: {e}")
+                # Fall back to 2D if 3D crashes
+                fig = make_heightmap_2d(self.ensemble)
+                self.status_var.set(self.status_var.get().split("•")[0].strip() + "  •  3D failed, showing 2D")
         else:
             fig = make_topographic(self.ensemble)
 
@@ -625,6 +635,15 @@ class HeightMapApp(tk.Tk):
         widget.configure(bg=BG, highlightthickness=0)
         widget.pack(fill="both", expand=True)
         self.canvas_widget = canvas
+
+        # Resize figure to match frame on first draw and on resize
+        def on_resize(event):
+            w = event.width / fig.dpi
+            h = event.height / fig.dpi
+            if w > 0.5 and h > 0.5:
+                fig.set_size_inches(w, h, forward=False)
+                canvas.draw_idle()
+                widget.bind("<Configure>", on_resize)
 
     # ── path finder ───────────────────────────────────────────────────────────
 
