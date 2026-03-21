@@ -4,9 +4,9 @@ import os
 from datetime import datetime
 from bleak import BleakClient, BleakScanner
 
-SERVICE_UUID  = '12345678-1234-5678-1234-56789abcdef0'
-CMD_UUID      = '12345678-1234-5678-1234-56789abcdef1'
-DATA_UUID     = '12345678-1234-5678-1234-56789abcdef2'
+SERVICE_UUID = '12345678-1234-5678-1234-56789abcdef0'
+CMD_UUID     = '12345678-1234-5678-1234-56789abcdef1'
+DATA_UUID    = '12345678-1234-5678-1234-56789abcdef2'
 
 SAVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'images')
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -15,6 +15,7 @@ image_buffer = bytearray()
 expected_size = None
 
 def on_data(sender, data):
+    print(f"[DEBUG] on_data called: {len(data)} bytes, {repr(bytes(data)[:10])}")
     global image_buffer, expected_size
     if expected_size is None and len(data) == 4:
         expected_size = struct.unpack('>I', bytes(data))[0]
@@ -33,14 +34,22 @@ def on_data(sender, data):
 
 async def main():
     print("[INFO] Scanning for cubesat...")
-    device = await BleakScanner.find_device_by_name("cubesat", timeout=10)
+    device = await BleakScanner.find_device_by_name("cubesat", timeout=20)
     if not device:
         print("[ERROR] cubesat not found")
         return
 
-    async with BleakClient(device) as client:
-        print("[INFO] Connected. Press Enter to capture, q to quit.")
+    async with BleakClient(device, timeout=20) as client:
+        print("[DEBUG] Connected, listing services...")
+        for service in client.services:
+            print(f"[DEBUG] Service: {service.uuid}")
+            for char in service.characteristics:
+                print(f"[DEBUG]   Char: {char.uuid} props: {char.properties}")
+
         await client.start_notify(DATA_UUID, on_data)
+        print("[DEBUG] Notifications subscribed")
+        print("[INFO] Connected. Press Enter to capture, q to quit.")
+
         while True:
             cmd = input("> ").strip().lower()
             if cmd == 'q':
