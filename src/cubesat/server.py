@@ -43,8 +43,9 @@ def on_command(value, options):
     log.info(f"Received command: {repr(cmd)}")
     if cmd == b'C':
         if data_char is None:
-            log.error("No notification subscriber yet!")
-            return
+            # Try to find it directly
+            data_char = app.service_list[0].characteristic_list[1]
+            log.info(f"Found data_char directly: {data_char}")
         data = capture_image()
         size = len(data)
         try:
