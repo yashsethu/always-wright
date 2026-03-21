@@ -1,8 +1,9 @@
-import bluetooth
+import serial
 import struct
 from picamera2 import Picamera2
 import io
 import time
+import os
 
 def capture_image():
     picam2 = Picamera2()
@@ -12,32 +13,30 @@ def capture_image():
     picam2.stop()
     return buf.getvalue()
 
-server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-server_sock.bind(("", 1))
-server_sock.listen(1)
-
-bluetooth.advertise_service(server_sock, "CameraServer",
-    service_classes=[bluetooth.SERIAL_PORT_CLASS],
-    profiles=[bluetooth.SERIAL_PORT_PROFILE])
-
-print("Waiting for connection...")
+print("Waiting for connection on /dev/rfcomm0...")
 while True:
     try:
-        client_sock, address = server_sock.accept()
-        print(f"Connected: {address}")
+        if not os.path.exists('/dev/rfcomm0'):
+            time.sleep(5)
+            continue
+        ser = serial.Serial('/dev/rfcomm0', 115200, timeout=60)
+        print("Connected, waiting for commands...")
         while True:
-            cmd = client_sock.recv(1)
+            cmd = ser.read(1)
             if cmd == b'C':
                 print("Capture triggered!")
                 data = capture_image()
                 size = len(data)
-                client_sock.send(struct.pack('>I', size))
-                client_sock.send(data)
+                ser.write(struct.pack('>I', size))
+                ser.write(data)
                 print(f"Sent {size} bytes")
             elif cmd == b'Q' or not cmd:
                 print("Disconnected")
                 break
-        client_sock.close()
+        ser.close()
+    except serial.SerialException:
+        print("No connection, retrying in 5 seconds...")
+        time.sleep(5)
     except Exception as e:
         print(f"Error: {e}, retrying in 5 seconds...")
         time.sleep(5)
