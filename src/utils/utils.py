@@ -417,7 +417,7 @@ class HeightMapApp(tk.Tk):
         self.view_var = tk.StringVar(value="2D Height Map")
         self.dropdown = ttk.Combobox(
             ctrl, textvariable=self.view_var,
-            values=["2D Height Map", "3D Interactive", "Topographic Map"],
+            values=["Raw Feed", "2D Height Map", "3D Interactive", "Topographic Map"],
             state="readonly", width=20, font=FONT)
         self.dropdown.pack(side="left")
         self.dropdown.bind("<<ComboboxSelected>>", self._on_dropdown_change)
@@ -501,6 +501,20 @@ class HeightMapApp(tk.Tk):
             self.status_var.set(f"Error: could not load {IMAGE_PATH}")
             return
         self.rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # Show raw immediately if in Raw Feed mode
+        if self.view_var.get() == "Raw Feed":
+            plt.close("all")
+            self._clear_canvas()
+            fig, ax = plt.subplots(figsize=(6, 6), facecolor=BG)
+            ax.set_facecolor(BG)
+            ax.imshow(self.rgb, origin="upper")
+            ax.axis("off")
+            fig.tight_layout(pad=0)
+            self.current_fig = fig
+            self._embed_figure(fig)
+            return  # skip heavy processing in raw mode
+
         fname = IMAGE_PATH.replace("\\", "/").split("/")[-1]
         self.status_var.set(f"{fname}  •  processing...")
         self._start_processing()
@@ -548,12 +562,24 @@ class HeightMapApp(tk.Tk):
         self._refresh_view()
 
     def _refresh_view(self):
-        if self.ensemble is None:
+        if self.ensemble is None and self.view_var.get() != "Raw Feed":
             return
         mode = self.view_var.get()
         self.status_var.set(self.status_var.get().split("•")[0].strip() + f"  •  {mode}")
         plt.close("all")
         self._clear_canvas()
+
+        if mode == "Raw Feed":
+            if self.rgb is None:
+                return
+            fig, ax = plt.subplots(figsize=(6, 6), facecolor=BG)
+            ax.set_facecolor(BG)
+            ax.imshow(self.rgb, origin="upper")
+            ax.axis("off")
+            fig.tight_layout(pad=0)
+            self.current_fig = fig
+            self._embed_figure(fig)
+            return
 
         if mode == "2D Height Map":
             fig = make_heightmap_2d(self.ensemble)
@@ -562,8 +588,8 @@ class HeightMapApp(tk.Tk):
         else:
             fig = make_topographic(self.ensemble)
 
-        self.current_fig = fig
-        self._embed_figure(fig)
+    self.current_fig = fig
+    self._embed_figure(fig)
 
     def _clear_canvas(self):
         if self._click_cid is not None and self.current_fig is not None:
