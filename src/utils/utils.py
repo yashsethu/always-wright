@@ -396,6 +396,8 @@ class HeightMapApp(tk.Tk):
         self._path_result   = []
         self._click_cid     = None
 
+        self._pending_frame = None  # latest unprocessed frame
+
         self._build_ui()
         self._style_ttk()
         self.after(100, self._load_image)
@@ -494,33 +496,41 @@ class HeightMapApp(tk.Tk):
     # ── image loading ─────────────────────────────────────────────────────────
 
     def _load_image(self):
-        if self._processing:
-            return
         img = cv2.imread(IMAGE_PATH)
         if img is None:
-            return  # silently skip instead of showing error
+            return
         self.rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if self.view_var.get() == "Raw Feed":
             if not hasattr(self, '_raw_fig') or self._raw_fig is None:
-                # First time — create the figure
                 self._raw_fig, self._raw_ax = plt.subplots(figsize=(6, 6), facecolor=BG)
                 self._raw_ax.set_facecolor(BG)
-                self._raw_im = self._raw_ax.imshow(self.rgb, origin="upper")
+                self._raw_im = self._raw_ax.imshow(self.rgb, origin="upper", aspect='auto')
+                self._raw_ax.set_position([0, 0, 1, 1])
                 self._raw_ax.axis("off")
-                self._raw_fig.tight_layout(pad=0)
                 self.current_fig = self._raw_fig
                 self._embed_figure(self._raw_fig)
             else:
-                # Subsequent frames — just update the image data, no redraw
                 self._raw_im.set_data(self.rgb)
                 self._raw_fig.canvas.draw_idle()
             self.status_var.set(f"Raw Feed  •  {self.rgb.shape[1]}x{self.rgb.shape[0]}")
             return
 
-        fname = IMAGE_PATH.replace("\\", "/").split("/")[-1]
-        self.status_var.set(f"{fname}  •  processing...")
-        self._start_processing()
+        # For all other modes: store latest frame, start processing if not already running
+        self._pending_frame = self.rgb.copy()
+        if not self._processing:
+            self._process_next_frame()
+
+    def _process_next_frame(self):
+        if self._pending_frame is None:
+            return
+        self.rgb = self._pending_frame
+        self._pending_frame = None
+        self._processing = True
+        self.dropdown.config(state="disabled")
+        self.progress.place(relx=0.5, rely=0.5, anchor="center")
+        self.progress.start(12)
+        threading.Thread(target=self._process_worker, daemon=True).start()
 
     def _start_processing(self):
         self._processing = True
@@ -547,9 +557,10 @@ class HeightMapApp(tk.Tk):
         self.progress.place_forget()
         self._processing = False
         self.dropdown.config(state="readonly")
-        name = self.status_var.get().split("•")[0].strip()
-        self.status_var.set(f"{name}  •  ready")
         self._refresh_view()
+        # Immediately process next frame if one arrived while we were busy
+        if self._pending_frame is not None:
+            self.after(0, self._process_next_frame)
 
     def _on_processing_error(self, msg):
         self.progress.stop()
