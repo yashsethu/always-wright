@@ -3,6 +3,7 @@ import io
 import logging
 from bluezero import peripheral, adapter
 from picamera2 import Picamera2
+import time
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -33,9 +34,11 @@ def on_command(value, options):
         data = capture_image()
         size = len(data)
         app.update_value(srv_id=1, chr_id=2, value=list(struct.pack('>I', size)))
+        time.sleep(0.1)
         for i in range(0, size, CHUNK_SIZE):
             chunk = data[i:i+CHUNK_SIZE]
             app.update_value(srv_id=1, chr_id=2, value=list(chunk))
+            time.sleep(0.05)
             log.info(f"Sent chunk {i//CHUNK_SIZE + 1}/{(size+CHUNK_SIZE-1)//CHUNK_SIZE}")
         log.info("Transfer complete")
 
